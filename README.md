@@ -1,62 +1,449 @@
-# testproject
 """
-Weather Diary - Дневник погоды
-Консольное приложение для ведения дневника погоды.
-Позволяет добавлять записи о температуре, осадках, фильтровать их по дате и строить графики температуры.
+Book Tracker - Трекер прочитанных книг
+GUI-приложение для управления списком прочитанных книг с фильтрацией и сохранением в JSON
 """
 
+import tkinter as tk
+from tkinter import ttk, messagebox
 import json
 import os
 from datetime import datetime
 
 # Имя файла для сохранения данных
-DATA_FILE = "data.json"
+DATA_FILE = "books.json"
 
 
-class WeatherEntry:
-    """Класс для хранения одной записи о погоде."""
+class Book:
+    """Класс для хранения информации о книге."""
 
-    def __init__(self, date, temperature, description, precipitation, humidity=None):
-        self.date = date  # ГГГГ-ММ-ДД
-        self.temperature = float(temperature)
-        self.description = description
-        self.precipitation = precipitation  # True/False
-        self.humidity = int(humidity) if humidity else None
+    def __init__(self, title, author, genre, pages):
+        self.title = title.strip()
+        self.author = author.strip()
+        self.genre = genre.strip()
+        self.pages = int(pages)
 
     def to_dict(self):
-        """Преобразует запись в словарь для JSON."""
+        """Преобразует книгу в словарь для JSON."""
         return {
-            "date": self.date,
-            "temperature": self.temperature,
-            "description": self.description,
-            "precipitation": self.precipitation,
-            "humidity": self.humidity
+            "title": self.title,
+            "author": self.author,
+            "genre": self.genre,
+            "pages": self.pages
         }
 
     @classmethod
     def from_dict(cls, data):
-        """Создаёт запись из словаря."""
+        """Создаёт книгу из словаря."""
         return cls(
-            date=data["date"],
-            temperature=data["temperature"],
-            description=data["description"],
-            precipitation=data["precipitation"],
-            humidity=data.get("humidity")
+            title=data["title"],
+            author=data["author"],
+            genre=data["genre"],
+            pages=data["pages"]
         )
 
-    def __str__(self):
-        """Строковое представление записи для вывода."""
-        precipitation_text = "Осадки" if self.precipitation else "Без осадков"
-        humidity_text = f" | Влажность: {self.humidity}%" if self.humidity else ""
-        return f"📅 {self.date} | {self.temperature}°C | {self.description} | {precipitation_text}{humidity_text}"
 
+class BookTrackerApp:
+    """Главный класс приложения Book Tracker."""
 
-class WeatherDiary:
- """Основной класс приложения для работы с дневником погоды."""
+    def __init__(self, root):
+        self.root = root
+        self.root.title("📚 Book Tracker - Трекер прочитанных книг")
+        self.root.geometry("900x600")
+        self.root.resizable(True, True)
+        self.root.configure(bg="#f5f5f5")
 
-    def __init__(self):
-        self.entries = []
+        # Список всех книг
+        self.books = []
+
+        # Загружаем данные из файла
         self.load_data()
+
+        # Создаём интерфейс
+        self.create_widgets()
+
+        # Обновляем отображение
+        self.refresh_book_list()
+
+    def create_widgets(self):
+        """Создание всех элементов интерфейса."""
+
+        # ==================== ВЕРХНЯЯ ПАНЕЛЬ (ВВОД ДАННЫХ) ====================
+        input_frame = tk.LabelFrame(
+            self.root,
+            text="📖 Добавление новой книги",
+            font=("Arial", 12, "bold"),
+            bg="#ffffff",
+            fg="#333333",
+            padx=15,
+            pady=15
+        )
+        input_frame.pack(pady=15, padx=15, fill="x")
+
+        # Поле для названия книги
+        tk.Label(input_frame, text="📌 Название книги:", font=("Arial", 10), bg="#ffffff").grid(
+            row=0, column=0, sticky="w", padx=(0, 10), pady=5
+        )
+        self.title_entry = tk.Entry(input_frame, width=25, font=("Arial", 10), relief="solid", bd=1)
+        self.title_entry.grid(row=0, column=1, padx=(0, 20), pady=5)
+
+        # Поле для автора
+        tk.Label(input_frame, text="👤 Автор:", font=("Arial", 10), bg="#ffffff").grid(
+            row=0, column=2, sticky="w", padx=(0, 10), pady=5
+        )
+        self.author_entry = tk.Entry(input_frame, width=20, font=("Arial", 10), relief="solid", bd=1)
+        self.author_entry.grid(row=0, column=3, padx=(0, 20), pady=5)
+
+        # Поле для жанра
+        tk.Label(input_frame, text="🎭 Жанр:", font=("Arial", 10), bg="#ffffff").grid(
+            row=1, column=0, sticky="w", padx=(0, 10), pady=5
+        )
+        self.genre_entry = tk.Entry(input_frame, width=25, font=("Arial", 10), relief="solid", bd=1)
+        self.genre_entry.grid(row=1, column=1, padx=(0, 20), pady=5)
+
+        # Поле для количества страниц
+        tk.Label(input_frame, text="📄 Количество страниц:", font=("Arial", 10), bg="#ffffff").grid(
+            row=1, column=2, sticky="w", padx=(0, 10), pady=5
+        )
+        self.pages_entry = tk.Entry(input_frame, width=20, font=("Arial", 10), relief="solid", bd=1)
+        self.pages_entry.grid(row=1, column=3, padx=(0, 20), pady=5)
+
+        # Кнопка добавления книги
+        self.add_button = tk.Button(
+            input_frame,
+            text="➕ Добавить книгу",
+            command=self.add_book,
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            cursor="hand2",
+            padx=10,
+            pady=5
+        )
+        self.add_button.grid(row=2, column=0, columnspan=4, pady=15)
+
+        # ==================== ПАНЕЛЬ ФИЛЬТРАЦИИ ====================
+        filter_frame = tk.LabelFrame(
+            self.root,
+            text="🔍 Фильтрация книг",
+            font=("Arial", 12, "bold"),
+            bg="#ffffff",
+            fg="#333333",
+            padx=15,
+            pady=10
+        )
+        filter_frame.pack(pady=(0, 15), padx=15, fill="x")
+
+        # Фильтр по жанру
+        tk.Label(filter_frame, text="Фильтр по жанру:", font=("Arial", 10), bg="#ffffff").grid(
+            row=0, column=0, sticky="w", padx=(0, 10)
+        )
+        self.genre_filter_var = tk.StringVar(value="Все")
+        self.genre_filter_combo = ttk.Combobox(
+            filter_frame,
+            textvariable=self.genre_filter_var,
+            width=20,
+            state="readonly"
+        )
+        self.genre_filter_combo.grid(row=0, column=1, padx=(0, 20))
+        self.genre_filter_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_book_list())
+
+        # Фильтр по количеству страниц
+        tk.Label(filter_frame, text="Страниц больше:", font=("Arial", 10), bg="#ffffff").grid(
+            row=0, column=2, sticky="w", padx=(0, 10)
+        )
+        self.pages_filter_var = tk.StringVar(value="0")
+        self.pages_filter_entry = tk.Entry(
+            filter_frame,
+            textvariable=self.pages_filter_var,
+            width=10,
+            font=("Arial", 10),
+            relief="solid",
+            bd=1
+        )
+        self.pages_filter_entry.grid(row=0, column=3, padx=(0, 10))
+        self.pages_filter_entry.bind("<KeyRelease>", lambda e: self.refresh_book_list())
+
+        # Кнопка сброса фильтров
+        self.reset_filter_button = tk.Button(
+            filter_frame,
+            text="🔄 Сбросить фильтры",
+            command=self.reset_filters,
+            bg="#FF9800",
+            fg="white",
+            font=("Arial", 9),
+            cursor="hand2",
+            padx=10
+        )
+        self.reset_filter_button.grid(row=0, column=4, padx=(20, 0))
+
+        # ==================== ОБЛАСТЬ ОТОБРАЖЕНИЯ КНИГ ====================
+        list_frame = tk.LabelFrame(
+            self.root,
+            text="📚 Список прочитанных книг",
+            font=("Arial", 12, "bold"),
+            bg="#ffffff",
+            fg="#333333",
+            padx=10,
+            pady=10
+        )
+        list_frame.pack(pady=(0, 15), padx=15, fill="both", expand=True)
+
+        # Создаём Treeview (таблицу) для отображения книг
+        columns = ("Название", "Автор", "Жанр", "Страницы")
+        self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=12)
+
+        # Настройка столбцов
+        self.tree.heading("Название", text="📌 Название книги")
+        self.tree.heading("Автор", text="👤 Автор")
+        self.tree.heading("Жанр", text="🎭 Жанр")
+        self.tree.heading("Страницы", text="📄 Страницы")
+
+        self.tree.column("Название", width=250)
+        self.tree.column("Автор", width=180)
+        self.tree.column("Жанр", width=120)
+        self.tree.column("Страницы", width=80, anchor="center")
+
+        # Добавляем скроллбар
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+
+        self.tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Привязываем обработчик выбора книги
+        self.tree.bind("<<TreeviewSelect>>", self.on_select_book)
+
+        # ==================== НИЖНЯЯ ПАНЕЛЬ (КНОПКИ УПРАВЛЕНИЯ) ====================
+        bottom_frame = tk.Frame(self.root, bg="#f5f5f5")
+        bottom_frame.pack(pady=(0, 15), padx=15, fill="x")
+
+        # Кнопка удаления книги
+        self.delete_button = tk.Button(
+            bottom_frame,
+            text="🗑️ Удалить выбранную книгу",
+            command=self.delete_book,
+            bg="#f44336",
+            fg="white",
+            font=("Arial", 10),
+            cursor="hand2",
+            padx=10,
+            pady=5
+        )
+        self.delete_button.pack(side="left", padx=5)
+
+        # Кнопка очистки всех данных
+        self.clear_all_button = tk.Button(
+            bottom_frame,
+            text="⚠️ Очистить все книги",
+            command=self.clear_all_books,
+            bg="#9E9E9E",
+            fg="white",
+            font=("Arial", 10),
+            cursor="hand2",
+            padx=10,
+            pady=5
+        )
+        self.clear_all_button.pack(side="left", padx=5)
+
+        # Статистика
+        self.stats_label = tk.Label(
+            bottom_frame,
+            text="",
+            font=("Arial", 10),
+            bg="#f5f5f5",
+            fg="#666666"
+        )
+        self.stats_label.pack(side="right", padx=10)
+
+    def add_book(self):
+        """Добавляет новую книгу."""
+        # Получаем данные из полей ввода
+        title = self.title_entry.get()
+        author = self.author_entry.get()
+        genre = self.genre_entry.get()
+        pages = self.pages_entry.get()
+
+        # Проверка на пустые поля
+        if not title:
+            messagebox.showwarning("Ошибка", "Пожалуйста, введите название книги!")
+            return
+
+        if not author:
+            messagebox.showwarning("Ошибка", "Пожалуйста, введите автора!")
+            return
+
+        if not genre:
+            messagebox.showwarning("Ошибка", "Пожалуйста, введите жанр!")
+            return
+
+        if not pages:
+            messagebox.showwarning("Ошибка", "Пожалуйста, введите количество страниц!")
+            return
+
+        # Проверка, что количество страниц - число
+        try:
+            pages_int = int(pages)
+            if pages_int <= 0:
+                messagebox.showwarning("Ошибка", "Количество страниц должно быть больше 0!")
+                return
+        except ValueError:
+            messagebox.showwarning("Ошибка", "Количество страниц должно быть целым числом!")
+            return
+
+        # Создаём книгу и добавляем в список
+        book = Book(title, author, genre, pages_int)
+        self.books.append(book)
+        self.save_data()
+
+        # Очищаем поля ввода
+        self.title_entry.delete(0, tk.END)
+        self.author_entry.delete(0, tk.END)
+        self.genre_entry.delete(0, tk.END)
+        self.pages_entry.delete(0, tk.END)
+
+        # Обновляем список книг
+        self.update_genre_filter()
+        self.refresh_book_list()
+
+        messagebox.showinfo("Успех", f"Книга '{title}' успешно добавлена!")
+
+    def delete_book(self):
+        """Удаляет выбранную книгу."""
+        selected_item = self.tree.selection()
+
+        if not selected_item:
+            messagebox.showwarning("Предупреждение", "Пожалуйста, выберите книгу для удаления!")
+            return
+
+        # Получаем название книги из выбранной строки
+        item = self.tree.item(selected_item[0])
+        title = item["values"][0]
+
+        # Подтверждение удаления
+        result = messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить книгу '{title}'?")
+
+        if result:
+            # Находим и удаляем книгу
+            self.books = [book for book in self.books if book.title != title]
+            self.save_data()
+
+            # Обновляем отображение
+            self.update_genre_filter()
+            self.refresh_book_list()
+
+            messagebox.showinfo("Успех", f"Книга '{title}' удалена!")
+
+    def clear_all_books(self):
+        """Очищает все книги."""
+        if not self.books:
+            messagebox.showinfo("Информация", "Список книг уже пуст!")
+            return
+
+        result = messagebox.askyesno(
+            "Подтверждение",
+            "⚠️ ВНИМАНИЕ! Это действие удалит ВСЕ книги.\nВы уверены?"
+        )
+
+        if result:
+            self.books = []
+            self.save_data()
+            self.update_genre_filter()
+            self.refresh_book_list()
+            messagebox.showinfo("Успех", "Все книги удалены!")
+
+    def on_select_book(self, event):
+        """Обработчик выбора книги из списка."""
+        selected_item = self.tree.selection()
+        if not selected_item:
+            return
+
+        item = self.tree.item(selected_item[0])
+        title = item["values"][0]
+
+        # Находим книгу и заполняем поля для редактирования
+        for book in self.books:
+            if book.title == title:
+                self.title_entry.delete(0, tk.END)
+                self.title_entry.insert(0, book.title)
+
+                self.author_entry.delete(0, tk.END)
+                self.author_entry.insert(0, book.author)
+
+                self.genre_entry.delete(0, tk.END)
+                self.genre_entry.insert(0, book.genre)
+
+                self.pages_entry.delete(0, tk.END)
+                self.pages_entry.insert(0, str(book.pages))
+                break
+
+    def update_genre_filter(self):
+        """Обновляет список жанров в выпадающем списке."""
+        genres = sorted(set(book.genre for book in self.books))
+        genres.insert(0, "Все")
+        self.genre_filter_combo["values"] = genres
+
+        # Если текущее значение не в списке, сбрасываем
+        if self.genre_filter_var.get() not in genres:
+            self.genre_filter_var.set("Все")
+
+    def refresh_book_list(self):
+        """Обновляет отображение книг с учётом фильтров."""
+        # Очищаем текущий список
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        # Получаем отфильтрованный список книг
+        filtered_books = self.get_filtered_books()
+
+        # Добавляем книги в таблицу
+        for book in filtered_books:
+            self.tree.insert("", tk.END, values=(book.title, book.author, book.genre, book.pages))
+
+        # Обновляем статистику
+        total_books = len(self.books)
+        filtered_count = len(filtered_books)
+
+        if total_books == filtered_count:
+            self.stats_label.config(text=f"📊 Всего книг: {total_books}")
+        else:
+            self.stats_label.config(text=f"📊 Показано: {filtered_count} из {total_books}")
+
+    def get_filtered_books(self):
+        """Возвращает отфильтрованный список книг."""
+        filtered = self.books[:]
+
+        # Фильтр по жанру
+        selected_genre = self.genre_filter_var.get()
+        if selected_genre != "Все":
+            filtered = [book for book in filtered if book.genre == selected_genre]
+
+        # Фильтр по количеству страниц
+        try:
+            pages_filter = int(self.pages_filter_var.get())
+            if pages_filter > 0:
+                filtered = [book for book in filtered if book.pages > pages_filter]
+        except ValueError:
+            pass
+
+        return filtered
+
+    def reset_filters(self):
+        """Сбрасывает все фильтры."""
+        self.genre_filter_var.set("Все")
+        self.pages_filter_var.set("0")
+        self.refresh_book_list()
+
+    def save_data(self):
+        """Сохраняет данные в JSON-файл."""
+        data = {
+            "books": [book.to_dict() for book in self.books],
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        with open(DATA_FILE, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=4)
+
+        print(f"💾 Данные сохранены в {DATA_FILE}")
 
     def load_data(self):
         """Загружает данные из JSON-файла."""
@@ -64,232 +451,16 @@ class WeatherDiary:
             try:
                 with open(DATA_FILE, "r", encoding="utf-8") as file:
                     data = json.load(file)
-                    self.entries = [WeatherEntry.from_dict(entry) for entry in data.get("entries", [])]
-                print(f"✅ Загружено {len(self.entries)} записей из {DATA_FILE}")
-            except (json.JSONDecodeError, FileNotFoundError):
-                print("⚠️ Файл повреждён. Начинаем с пустого дневника.")
-                self.entries = []
-        else:
-            print("📝 Создан новый дневник погоды.")
-
-    def save_data(self):
-        """Сохраняет данные в JSON-файл."""
-        data = {
-            "entries": [entry.to_dict() for entry in self.entries]
-        }
-        with open(DATA_FILE, "w", encoding="utf-8") as file:
-            json.dump(data, file, ensure_ascii=False, indent=4)
-        print(f"💾 Данные сохранены в {DATA_FILE}")
-
-    def add_entry(self):
-        """Добавляет новую запись о погоде."""
-        print("\n--- Добавление новой записи ---")
-
-        # Ввод даты с проверкой
-        while True:
-            date = input("Введите дату (ГГГГ-ММ-ДД): ").strip()
-            try:
-                datetime.strptime(date, "%Y-%m-%d")
-                break
-            except ValueError:
-                print("❌ Ошибка: неверный формат даты. Используйте ГГГГ-ММ-ДД")
-
-        # Ввод температуры
-        while True:
-            try:
-                temperature = float(input("Введите температуру (°C): "))
-                break
-            except ValueError:
-                print("❌ Ошибка: введите число!")
-
-        description = input("Введите описание погоды: ").strip()
-
-        # Ввод осадков
-        while True:
-            precipitation_input = input("Осадки (да/нет): ").strip().lower()
-            if precipitation_input in ["да", "yes", "y", "1", "true", "+"]:
-                precipitation = True
-                break
-            elif precipitation_input in ["нет", "no", "n", "0", "false", "-"]:
-                precipitation = False
-                break
-            else:
-                print("❌ Ошибка: введите 'да' или 'нет'")
-
-        # Ввод влажности (опционально)
-        humidity = None
-        humidity_input = input("Введите влажность (%) (необязательно, нажмите Enter): ").strip()
-        if humidity_input:
-            try:
-                humidity = int(humidity_input)
-            except ValueError:
-                print("⚠️ Влажность не сохранена (введите число)")
-
-        # Создаём и добавляем запись
-        entry = WeatherEntry(date, temperature, description, precipitation, humidity)
-        self.entries.append(entry)
-        self.save_data()
-        print(f"✅ Запись на {date} успешно добавлена!")
-
-    def show_all_entries(self):
-        """Показывает все записи."""
-        if not self.entries:
-            print("\n📭 Дневник пуст. Добавьте первую запись!")
-            return
-
-        print("\n" + "=" * 40)
-        print("         Все записи о погоде")
-        print("=" * 40)
-
-        # Сортируем по дате
-        sorted_entries = sorted(self.entries, key=lambda x: x.date)
-
-        for entry in sorted_entries:
-            print(entry)
-
-        print("-" * 40)
-        print(f"📊 Всего записей: {len(self.entries)}")
-
-    def filter_by_date(self):
-        """Фильтрует записи по дате."""
-        if not self.entries:
-            print("\n📭 Дневник пуст.")
-            return
-
-        date = input("\nВведите дату для поиска (ГГГГ-ММ-ДД): ").strip()
-
-        found = [entry for entry in self.entries if entry.date == date]
-
-        if found:
-            print(f"\n📅 Записи за {date}:")
-            for entry in found:
-                print(entry)
-            print(f"📊 Найдено записей: {len(found)}")
-        else:
-            print(f"❌ Записей на дату {date} не найдено.")
-
-    def filter_by_temperature(self):
-        """Фильтрует записи по температуре (выше порога)."""
-        if not self.entries:
-            print("\n📭 Дневник пуст.")
-            return
-
-        try:
-            min_temp = float(input("\nВведите минимальную температуру: "))
-        except ValueError:
-            print("❌ Ошибка: введите число!")
-            return
-
-        filtered = [entry for entry in self.entries if entry.temperature >= min_temp]
-
-        if filtered:
-            print(f"\n🌡️ Записи с температурой ≥ {min_temp}°C:")
-            for entry in filtered:
-                print(entry)
-            print(f"📊 Найдено записей: {len(filtered)}")
-        else:
-            print(f"❌ Записей с температурой ≥ {min_temp}°C не найдено.")
-
-    def plot_temperature_graph(self):
-        """Строит график температуры (если установлена matplotlib)."""
-        if len(self.entries) < 2:
-            print("\n⚠️ Для построения графика нужно минимум 2 записи.")
-            return
-
-        try:
-            import matplotlib.pyplot as plt
-
-            # Сортируем по дате
-            sorted_entries = sorted(self.entries, key=lambda x: x.date)
-
-            dates = [entry.date for entry in sorted_entries]
-            temperatures = [entry.temperature for entry in sorted_entries]
-
-            # Создаём график
-            plt.figure(figsize=(10, 5))
-            plt.plot(dates, temperatures, marker='o', linestyle='-', color='blue', linewidth=2)
-
-            plt.title("График изменения температуры", fontsize=14, fontweight='bold')
-            plt.xlabel("Дата", fontsize=12)
-            plt.ylabel("Температура (°C)", fontsize=12)
-            plt.xticks(rotation=45)
-            plt.grid(True, alpha=0.3)
-
-            # Добавляем значения на график
-            for i, (date, temp) in enumerate(zip(dates, temperatures)):
-                plt.annotate(f"{temp}°C", (date, temp), textcoords="offset points", xytext=(0, 10), ha='center')
-
-            plt.tight_layout()
-            plt.show()
-            print("📈 График успешно построен!")
-
-        except ImportError:
-            print("\n❌ Библиотека matplotlib не установлена.")
-            print("Установите её командой: pip install matplotlib")
-
-    def show_statistics(self):
-        """Показывает статистику по записям."""
-        if not self.entries:
-            print("\n📭 Нет данных для статистики.")
-            return
-
-        temperatures = [entry.temperature for entry in self.entries]
-        precipitation_count = sum(1 for entry in self.entries if entry.precipitation)
-
-        print("\n" + "=" * 40)
-        print("         📊 Статистика")
-        print("=" * 40)
-        print(f"📝 Всего записей: {len(self.entries)}")
-        print(f"🌡️ Средняя температура: {sum(temperatures) / len(temperatures):.1f}°C")
-        print(f"📈 Максимальная температура: {max(temperatures)}°C")
-        print(f"📉 Минимальная температура: {min(temperatures)}°C")
-        print(f"☔ Дней с осадками: {precipitation_count}")
-        print(f"☀️ Дней без осадков: {len(self.entries) - precipitation_count}")
+                    self.books = [Book.from_dict(book_data) for book_data in data.get("books", [])]
+                    last_updated = data.get("last_updated", "Неизвестно")
+                    print(f"✅ Загружено {len(self.books)} книг. Последнее обновление: {last_updated}")
+            except (json.JSONDecodeError, FileNotFoundError, KeyError) as e:
+                print(f"⚠️ Ошибка загрузки данных: {e}")
+                self.books = []
 
 
-def show_menu():
-    """Отображает главное меню."""
-    print("\n" + "=" * 40)
-    print("    Weather Diary - Дневник погоды")
-    print("=" * 40)
-    print("1 — Добавить запись")
-    print("2 — Показать все записи")
-    print("3 — Фильтровать по дате")
-    print("4 — Фильтровать по температуре")
-    print("5 — Построить график температуры")
-    print("6 — Показать статистику")
-    print("7 — Выйти")
-    print("=" * 40)
-
-
-def main():
-    """Главная функция программы."""
-    print("\n🌦️ Добро пожаловать в Weather Diary!")
-
-    diary = WeatherDiary()
-
-    while True:
-        show_menu()
-        choice = input("Выберите действие (1-7): ").strip()
-
-        if choice == "1":
-            diary.add_entry()
-        elif choice == "2":
-            diary.show_all_entries()
-        elif choice == "3":
-            diary.filter_by_date()
-        elif choice == "4":
-            diary.filter_by_temperature()
-        elif choice == "5":
-            diary.plot_temperature_graph()
-        elif choice == "6":
-            diary.show_statistics()
-        elif choice == "7":
-            print("\n👋 До свидания! Данные сохранены.")
-            break
-        else:
-            print("❌ Ошибка: выберите пункт от 1 до 7.")
-
-
+# ==================== ЗАПУСК ПРИЛОЖЕНИЯ ====================
 if __name__ == "__main__":
-    main()
+    root = tk.Tk()
+    app = BookTrackerApp(root)
+    root.mainloop()
